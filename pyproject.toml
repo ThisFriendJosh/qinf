@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qinf"
+version = "0.0.1"
+description = "Q∞: hierarchical + meta-RL + intrinsic rewards + persistent memory"
+readme = "README.md"
+authors = [{ name = "Your Name" }]
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.25",
+  "torch>=2.2",
+  "gymnasium>=0.29",
+  "tqdm>=4.66",
+  "pyyaml>=6.0",
+  "lmdb>=1.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["qinf*"]
