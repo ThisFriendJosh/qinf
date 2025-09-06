@@ -1,0 +1,474 @@
+#Done! I dropped a runnable **Q∞ RL stack skeleton** into the canvas with:
+#
+#* repo layout
+#* `pyproject.toml`
+#* `configs/default.yml`
+#* core modules (env, QNet, hierarchy option, meta stub, intrinsic rewards, replay, learner)
+#* a minimal `scripts/run_toy.py`
+#* basic logger + README#
+#
+#Next steps I suggest:
+#
+#1. `pip install -e .` then `python scripts/run_toy.py`
+#2. Wire up a real curiosity model (forward/inverse dynamics)
+#3. Add options `GoToDoor`, `GoToGoal` and compare vs flat DQN
+#4. Flip on `ledger_mode` once you’re ready to persist snapshots#
+#
+#Want me to add a **prioritized replay** and a **LoRA-style meta adapter** in the next pass?
+#############
+# Q∞ RL Stack Skeleton
+# Monorepo scaffold with config, modules, and a runnable toy script.
+# Copy into a repo and `pip install -e .` to iterate.
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: pyproject.toml
+# ──────────────────────────────────────────────────────────────────────────────
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qinf"
+version = "0.0.1"
+description = "Q∞: hierarchical + meta-RL + intrinsic rewards + persistent memory"
+readme = "README.md"
+authors = [{ name = "Your Name" }]
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.25",
+  "torch>=2.2",
+  "gymnasium>=0.29",
+  "tqdm>=4.66",
+  "pyyaml>=6.0",
+  "lmdb>=1.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["qinf*"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: configs/default.yml
+# ──────────────────────────────────────────────────────────────────────────────
+experiment:
+  id: "toy-grid-hq-meta"
+  seed: 42
+  total_steps: 200000
+  log_every: 1000
+  eval_every: 10000
+
+env:
+  name: "GridWorldToy-v0"
+  size: 8
+  stochasticity: 0.05
+  reward_goal: 1.0
+  reward_step: -0.01
+  curriculum:
+    stages:
+      - {size: 6}
+      - {size: 8}
+      - {size: 10}
+
+model:
+  qnet: {type: "dueling", hidden: [256, 256]}
+  target_update_interval: 2000
+  double_q: true
+  distributional: false
+
+hierarchy:
+  options:
+    - name: "GoToKey"
+    - name: "GoToDoor"
+    - name: "GoToGoal"
+  scheduler: {type: "epsilon_soft", eps_start: 1.0, eps_end: 0.05, eps_steps: 50000}
+
+meta:
+  enabled: true
+  context_dim: 64
+  adapter: {type: "lora", rank: 8}
+  update_every: 10000
+
+intrinsic:
+  curiosity: {enabled: true, beta: 0.2}
+  empowerment: {enabled: false}
+  compression_gain: {enabled: true, beta: 0.1}
+
+memory:
+  backend: "lmdb"
+  path: "./runs/memory"
+  ledger_mode: false
+
+optim:
+  lr: 0.00025
+  batch_size: 128
+  gamma: 0.99
+  n_step: 3
+  replay: {capacity: 200000, warmup: 10000, prioritized: true, alpha: 0.6, beta0: 0.4}
+
+eval:
+  suites: ["transfer_small_to_large", "option_reuse", "catastrophic_forgetting"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: qinf/__init__.py
+# ──────────────────────────────────────────────────────────────────────────────
+__all__ = []
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: qinf/runtime/logging.py
+# ──────────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+import json, time
+
+@dataclass
+class Logger:
+    root: Path
+    run_id: str
+
+    def __post_init__(self):
+        self.dir = self.root / self.run_id
+        self.dir.mkdir(parents=True, exist_ok=True)
+        (self.dir / "events.jsonl").touch(exist_ok=True)
+
+    def log(self, **kv: Any) -> None:
+        kv = {"t": time.time(), **kv}
+        with (self.dir / "events.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(kv) + "\n")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: qinf/envs/api.py
+# ──────────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
+from typing import Protocol, Any, Dict, Tuple
+
+class Env(Protocol):
+    def reset(self, *, seed: int | None = None) -> Tuple[Any, Dict]: ...
+    def step(self, action: int) -> Tuple[Any, float, bool, bool, Dict]: ...
+    @property
+    def action_space(self) -> int: ...
+    @property
+    def observation_space(self) -> Tuple[int, ...]: ...
+
+class Task:
+    """Env + goal spec; placeholder for curriculum support."""
+    def __init__(self, env: Env, goal: dict | None = None):
+        self.env, self.goal = env, (goal or {})
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: qinf/envs/gridtoy.py
+# ──────────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
+from typing import Tuple, Dict, Any
+import numpy as np
+
+A_UP, A_DOWN, A_LEFT, A_RIGHT = 0,1,2,3
+
+class GridToy:
+    def __init__(self, size=8, stochasticity=0.05, reward_step=-0.01, reward_goal=1.0):
+        self.size = size
+        self.p = stochasticity
+        self.r_step = reward_step
+        self.r_goal = reward_goal
+        self.action_space = 4
+        self.observation_dim = size * size
+        self._rng = np.random.default_rng()
+        self.reset()
+
+    def reset(self, *, seed: int | None = None):
+        if seed is not None:
+            self._rng = np.random.default_rng(seed)
+        self.agent = np.array([0,0])
+        self.key = np.array([self.size//2, self.size//2])
+        self.door = np.array([self.size-2, self.size-2])
+        self.goal = np.array([self.size-1, self.size-1])
+        self.has_key = False
+        return self._obs(), {}
+
+    def step(self, a: int):
+        a = int(a)
+        if self._rng.random() < self.p:
+            a = self._rng.integers(0,4)
+        if a == A_UP:   self.agent[0] = max(0, self.agent[0]-1)
+        if a == A_DOWN: self.agent[0] = min(self.size-1, self.agent[0]+1)
+        if a == A_LEFT: self.agent[1] = max(0, self.agent[1]-1)
+        if a == A_RIGHT:self.agent[1] = min(self.size-1, self.agent[1]+1)
+        r = self.r_step
+        if (self.agent == self.key).all():
+            self.has_key = True
+        terminated = False
+        if (self.agent == self.goal).all() and self.has_key:
+            r += self.r_goal
+            terminated = True
+        truncated = False
+        return self._obs(), float(r), terminated, truncated, {}
+
+    def _obs(self):
+        flat = np.zeros((self.observation_dim,), dtype=np.float32)
+        idx = self.agent[0]*self.size + self.agent[1]
+        flat[idx] = 1.0
+        obs = {
+            "flat": flat,
+            "needs_key": not self.has_key,
+            "at_key": bool((self.agent == self.key).all()),
+            "at_goal": bool((self.agent == self.goal).all()),
+            "suggested_action_to_key": int(np.random.randint(0,4)),
+        }
+        return obs
+
+
+def make_env(**cfg):
+    return GridToy(**cfg)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: qinf/models/qnet.py
+# ──────────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
+import torch, torch.nn as nn
+
+class DuelingQNet(nn.Module):
+    def __init__(self, obs_dim: int, n_actions: int, hidden: list[int] = [256,256]):
+        super().__init__()
+        self.body = nn.Sequential(
+            nn.Linear(obs_dim, hidden[0]), nn.ReLU(),
+            nn.Linear(hidden[0], hidden[1]), nn.ReLU(),
+        )
+        self.V = nn.Linear(hidden[1], 1)
+        self.A = nn.Linear(hidden[1], n_actions)
+
+    def forward(self, x):
+        h = self.body(x)
+        v = self.V(h)
+        a = self.A(h)
+        q = v + (a - a.mean(dim=1, keepdim=True))
+        return q
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: qinf/hierarchy/options.py
+# ──────────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
+from abc import ABC, abstractmethod
+
+class Option(ABC):
+    @abstractmethod
+    def should_start(self, obs) -> bool: ...
+    @abstractmethod
+    def policy(self, obs) -> int: ...
+    @abstractmethod
+    def should_terminate(self, obs, step_count: int) -> bool: ...
+
+class OptionScheduler(ABC):
+    @abstractmethod
+    def select(self, obs, available_options: list[Option]): ...
+
+class GoToKey(Option):
+    def should_start(self, obs): return obs.get("needs_key", False)
+    def policy(self, obs): return int(obs.get("suggested_action_to_key", 0))
+    def should_terminate(self, obs, t): return obs.get("at_key", False) or t > 50
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: qinf/meta/meta_learner.py
+# ──────────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
+
+class MetaLearner:
+    """Placeholder meta-learner. Encodes context; adapts QNet (e.g., with LoRA)."""
+    def __init__(self, context_dim: int = 64, adapter_cfg: dict | None = None):
+        self.context_dim = context_dim
+        self.adapter_cfg = adapter_cfg or {"type":"lora","rank":8}
+    def encode_context(self, traj_batch):
+        return None  # TODO: implement
+    def adapt(self, qnet, context) -> None:
+        return None  # TODO: implement
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: qinf/intrinsic/rewards.py
+# ──────────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
+
+class IntrinsicReward:
+    def compute(self, obs, next_obs, action, extras: dict) -> float:
+        return 0.0
+
+class CuriosityReward(IntrinsicReward):
+    def __init__(self, beta: float = 0.2):
+        self.beta = beta
+    def compute(self, obs, next_obs, action, extras):
+        # Placeholder: random small bonus to stimulate exploration
+        return 0.0
+
+class CompressionGainReward(IntrinsicReward):
+    def __init__(self, beta: float = 0.1):
+        self.beta = beta
+    def compute(self, obs, next_obs, action, extras):
+        return 0.0
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: qinf/memory/store.py
+# ──────────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
+from abc import ABC, abstractmethod
+
+class MemoryStore(ABC):
+    @abstractmethod
+    def put(self, key: bytes, value: bytes) -> None: ...
+    @abstractmethod
+    def get(self, key: bytes) -> bytes | None: ...
+    @abstractmethod
+    def commit_snapshot(self, manifest: dict) -> str: ...
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: qinf/train/replay.py
+# ──────────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
+import random
+
+class Replay:
+    def __init__(self, capacity=200000, warmup=10000):
+        self.capacity = capacity
+        self.warmup = warmup
+        self.buf = []
+        self.idx = 0
+    def add(self, s, a, r, s2, done):
+        item = (s["flat"], a, r, s2["flat"], done)
+        if len(self.buf) < self.capacity:
+            self.buf.append(item)
+        else:
+            self.buf[self.idx] = item
+            self.idx = (self.idx + 1) % self.capacity
+    def ready(self):
+        return len(self.buf) >= self.warmup
+    def sample(self, batch_size):
+        return random.sample(self.buf, batch_size)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: qinf/train/learner.py
+# ──────────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
+import torch, torch.nn.functional as F
+
+class QLearner:
+    def __init__(self, qnet, target_qnet, optim, replay, gamma=0.99, n_step=1, double_q=True):
+        self.q, self.tgt, self.opt = qnet, target_qnet, optim
+        self.replay, self.gamma, self.n_step, self.double_q = replay, gamma, n_step, double_q
+        self.step_i = 0
+    def step(self, batch):
+        import numpy as np
+        s, a, r, s2, d = zip(*batch)
+        s = torch.tensor(np.stack(s)).float()
+        a = torch.tensor(a).long().unsqueeze(1)
+        r = torch.tensor(r).float().unsqueeze(1)
+        s2 = torch.tensor(np.stack(s2)).float()
+        d = torch.tensor(d).float().unsqueeze(1)
+        qsa = self.q(s).gather(1, a)
+        with torch.no_grad():
+            if self.double_q:
+                a2 = torch.argmax(self.q(s2), dim=1, keepdim=True)
+                q_next = self.tgt(s2).gather(1, a2)
+            else:
+                q_next, _ = torch.max(self.tgt(s2), dim=1, keepdim=True)
+            target = r + (1.0 - d) * (self.gamma ** self.n_step) * q_next
+        loss = F.smooth_l1_loss(qsa, target)
+        self.opt.zero_grad(); loss.backward(); self.opt.step()
+        self.step_i += 1
+        return {"loss": float(loss.item())}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: scripts/run_toy.py
+# ──────────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
+import random, yaml, torch, numpy as np
+from pathlib import Path
+from qinf.envs.gridtoy import make_env
+from qinf.models.qnet import DuelingQNet
+from qinf.train.replay import Replay
+from qinf.train.learner import QLearner
+from qinf.hierarchy.options import GoToKey
+from qinf.intrinsic.rewards import CuriosityReward, CompressionGainReward
+from qinf.runtime.logging import Logger
+
+class EpsilonSoftScheduler:
+    def __init__(self, eps_start=1.0, eps_end=0.05, steps=50000):
+        self.eps_start, self.eps_end, self.steps = eps_start, eps_end, steps
+        self.t = 0
+    def eps(self):
+        k = max(0.0, (self.steps - self.t) / self.steps)
+        return self.eps_end + (self.eps_start - self.eps_end) * k
+    def select(self, obs, opts):
+        self.t += 1
+        use_option = random.random() > self.eps()
+        return random.choice(opts) if (use_option and opts) else None
+
+def set_seed(s):
+    random.seed(s); np.random.seed(s); torch.manual_seed(s)
+
+
+def main(cfg_path="configs/default.yml"):
+    cfg = yaml.safe_load(Path(cfg_path).read_text())
+    set_seed(cfg["experiment"]["seed"]) 
+    logger = Logger(Path("./runs"), cfg["experiment"]["id"])    
+
+    env = make_env(size=cfg["env"]["size"], stochasticity=cfg["env"]["stochasticity"],
+                   reward_step=cfg["env"]["reward_step"], reward_goal=cfg["env"]["reward_goal"])    
+    obs, _ = env.reset()
+    obs_dim, n_actions = env.observation_dim, env.action_space
+
+    q = DuelingQNet(obs_dim, n_actions)
+    tgt = DuelingQNet(obs_dim, n_actions); tgt.load_state_dict(q.state_dict())
+    optim = torch.optim.Adam(q.parameters(), lr=cfg["optim"]["lr"])
+    replay = Replay(capacity=cfg["optim"]["replay"]["capacity"], warmup=cfg["optim"]["replay"]["warmup"]) 
+    learner = QLearner(q, tgt, optim, replay, gamma=cfg["optim"]["gamma"], n_step=cfg["optim"]["n_step"], double_q=cfg["model"]["double_q"])    
+
+    options = [GoToKey()]  # Add more later
+    scheduler = EpsilonSoftScheduler(**cfg["hierarchy"]["scheduler"])    
+    r_cur = CuriosityReward(**cfg["intrinsic"]["curiosity"]) if cfg["intrinsic"]["curiosity"]["enabled"] else CuriosityReward(0.0)
+    r_cmp = CompressionGainReward(**cfg["intrinsic"]["compression_gain"]) if cfg["intrinsic"]["compression_gain"]["enabled"] else CompressionGainReward(0.0)
+
+    episodic_return, step = 0.0, 0
+    obs, _ = env.reset()
+    while step < cfg["experiment"]["total_steps"]:
+        available = [o for o in options if o.should_start(obs)]
+        opt = scheduler.select(obs, available)
+        if opt is not None:
+            t = 0
+            while True:
+                a = opt.policy(obs)
+                next_obs, r_ext, terminated, truncated, extras = env.step(a)
+                r_int = r_cur.compute(obs, next_obs, a, extras) + r_cmp.compute(obs, next_obs, a, extras)
+                replay.add(obs, a, r_ext + r_int, next_obs, terminated)
+                obs = next_obs; episodic_return += r_ext; step += 1; t += 1
+                if terminated or truncated or opt.should_terminate(obs, t):
+                    break
+        else:
+            # primitive action via greedy over Q with annealed epsilon in scheduler
+            x = torch.tensor(obs["flat"]).float().unsqueeze(0)
+            if random.random() < scheduler.eps():
+                a = random.randrange(n_actions)
+            else:
+                a = int(torch.argmax(q(x), dim=1))
+            next_obs, r_ext, terminated, truncated, extras = env.step(a)
+            r_int = r_cur.compute(obs, next_obs, a, extras) + r_cmp.compute(obs, next_obs, a, extras)
+            replay.add(obs, a, r_ext + r_int, next_obs, terminated)
+            obs = next_obs; episodic_return += r_ext; step += 1
+
+        if replay.ready():
+            logs = learner.step(replay.sample(cfg["optim"]["batch_size"]))
+            if step % cfg["experiment"]["log_every"] == 0:
+                logger.log(step=step, loss=logs["loss"], ret=episodic_return)
+                print(step, logs)
+            if step % cfg["model"]["target_update_interval"] == 0:
+                tgt.load_state_dict(q.state_dict())
+
+        if terminated or truncated:
+            obs, _ = env.reset(); episodic_return = 0.0
+
+if __name__ == "__main__":
+    main()
+
+# ──────────────────────────────────────────────────────────────────────────────
+# File: README.md
+# ──────────────────────────────────────────────────────────────────────────────
+# Q∞ (qinf)
+
+Minimal scaffold for hierarchical + meta-RL with intrinsic rewards and optional persistent memory/ledger. Start with `python scripts/run_toy.py` after installing deps. TODOs are marked in code.
