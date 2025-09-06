@@ -16,6 +16,12 @@ class Logger:
     memory: MemoryStore | None = None
 
     def __post_init__(self) -> None:
+@dataclass
+class Logger:
+    root: Path
+    run_id: str
+
+    def __post_init__(self):
         self.dir = self.root / self.run_id
         self.dir.mkdir(parents=True, exist_ok=True)
         (self.dir / "events.jsonl").touch(exist_ok=True)

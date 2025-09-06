@@ -1,3 +1,11 @@
+---
+intrinsic:
+  curiosity:
+    enabled: true
+    beta: 0.2
+  compression_gain:
+    enabled: true
+    beta: 0.1
 experiment:
   id: "toy-grid-hq-meta"
   seed: 42
@@ -11,6 +19,11 @@ env:
   stochasticity: 0.05
   reward_goal: 1.0
   reward_step: -0.01
+  curriculum:
+    stages:
+      - {size: 6}
+      - {size: 8}
+      - {size: 10}
 
 model:
   qnet: {type: "dueling", hidden: [256, 256]}
@@ -25,6 +38,19 @@ hierarchy:
 
 intrinsic:
   curiosity: {enabled: true, beta: 0.2}
+    - name: "GoToDoor"
+    - name: "GoToGoal"
+  scheduler: {type: "epsilon_soft", eps_start: 1.0, eps_end: 0.05, eps_steps: 50000}
+
+meta:
+  enabled: true
+  context_dim: 64
+  adapter: {type: "lora", rank: 8}
+  update_every: 10000
+
+intrinsic:
+  curiosity: {enabled: true, beta: 0.2}
+  empowerment: {enabled: false}
   compression_gain: {enabled: true, beta: 0.1}
 
 memory:
@@ -38,3 +64,7 @@ optim:
   gamma: 0.99
   n_step: 3
   replay: {capacity: 200000, warmup: 10000, prioritized: false}
+  replay: {capacity: 200000, warmup: 10000, prioritized: true, alpha: 0.6, beta0: 0.4}
+
+eval:
+  suites: ["transfer_small_to_large", "option_reuse", "catastrophic_forgetting"]
