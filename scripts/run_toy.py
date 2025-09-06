@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 import random
 import yaml
 import torch
 import numpy as np
+import random, yaml, torch, numpy as np
 from pathlib import Path
 from qinf.envs.gridtoy import make_env
 from qinf.models.qnet import DuelingQNet
@@ -21,6 +23,9 @@ class EpsilonSoftScheduler:
         k = max(0.0, (self.steps - self.t) / self.steps)
         return self.eps_end + (self.eps_start - self.eps_end) * k
 
+    def eps(self):
+        k = max(0.0, (self.steps - self.t) / self.steps)
+        return self.eps_end + (self.eps_start - self.eps_end) * k
     def select(self, obs, opts):
         self.t += 1
         use_option = random.random() > self.eps()
@@ -38,6 +43,16 @@ def main(cfg_path="configs/default.yml"):
 
     env = make_env(size=cfg["env"]["size"], stochasticity=cfg["env"]["stochasticity"],
                    reward_step=cfg["env"]["reward_step"], reward_goal=cfg["env"]["reward_goal"])
+    random.seed(s); np.random.seed(s); torch.manual_seed(s)
+
+
+def main(cfg_path="configs/default.yml"):
+    cfg = yaml.safe_load(Path(cfg_path).read_text())
+    set_seed(cfg["experiment"]["seed"]) 
+    logger = Logger(Path("./runs"), cfg["experiment"]["id"])    
+
+    env = make_env(size=cfg["env"]["size"], stochasticity=cfg["env"]["stochasticity"],
+                   reward_step=cfg["env"]["reward_step"], reward_goal=cfg["env"]["reward_goal"])    
     obs, _ = env.reset()
     obs_dim, n_actions = env.observation_dim, env.action_space
 
@@ -79,6 +94,19 @@ def main(cfg_path="configs/default.yml"):
     obs, _ = env.reset()
     total_steps = cfg["experiment"]["total_steps"]
     while step < total_steps:
+    tgt = DuelingQNet(obs_dim, n_actions); tgt.load_state_dict(q.state_dict())
+    optim = torch.optim.Adam(q.parameters(), lr=cfg["optim"]["lr"])
+    replay = Replay(capacity=cfg["optim"]["replay"]["capacity"], warmup=cfg["optim"]["replay"]["warmup"]) 
+    learner = QLearner(q, tgt, optim, replay, gamma=cfg["optim"]["gamma"], n_step=cfg["optim"]["n_step"], double_q=cfg["model"]["double_q"])    
+
+    options = [GoToKey()]  # Add more later
+    scheduler = EpsilonSoftScheduler(**cfg["hierarchy"]["scheduler"])    
+    r_cur = CuriosityReward(**cfg["intrinsic"]["curiosity"]) if cfg["intrinsic"]["curiosity"]["enabled"] else CuriosityReward(0.0)
+    r_cmp = CompressionGainReward(**cfg["intrinsic"]["compression_gain"]) if cfg["intrinsic"]["compression_gain"]["enabled"] else CompressionGainReward(0.0)
+
+    episodic_return, step = 0.0, 0
+    obs, _ = env.reset()
+    while step < cfg["experiment"]["total_steps"]:
         available = [o for o in options if o.should_start(obs)]
         opt = scheduler.select(obs, available)
         if opt is not None:
@@ -95,6 +123,11 @@ def main(cfg_path="configs/default.yml"):
                 if terminated or truncated or opt.should_terminate(obs, t):
                     break
         else:
+                obs = next_obs; episodic_return += r_ext; step += 1; t += 1
+                if terminated or truncated or opt.should_terminate(obs, t):
+                    break
+        else:
+
             x = torch.tensor(obs["flat"]).float().unsqueeze(0)
             if random.random() < scheduler.eps():
                 a = random.randrange(n_actions)
@@ -111,6 +144,10 @@ def main(cfg_path="configs/default.yml"):
             replay.anneal_beta(step / total_steps)
             batch = replay.sample(cfg["optim"]["batch_size"])
             logs = learner.step(batch)
+            obs = next_obs; episodic_return += r_ext; step += 1
+
+        if replay.ready():
+            logs = learner.step(replay.sample(cfg["optim"]["batch_size"]))
             if step % cfg["experiment"]["log_every"] == 0:
                 logger.log(step=step, loss=logs["loss"], ret=episodic_return)
                 print(step, logs)
@@ -120,6 +157,7 @@ def main(cfg_path="configs/default.yml"):
         if terminated or truncated:
             obs, _ = env.reset()
             episodic_return = 0.0
+            obs, _ = env.reset(); episodic_return = 0.0
 
 if __name__ == "__main__":
     main()

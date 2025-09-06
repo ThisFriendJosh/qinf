@@ -9,5 +9,10 @@ class MetaLearner:
     def encode_context(self, traj_batch):
         return None  # TODO: implement
 
+
+        self.adapter_cfg = adapter_cfg or {"type":"lora","rank":8}
+    def encode_context(self, traj_batch):
+        return None  # TODO: implement
+
     def adapt(self, qnet, context) -> None:
         return None  # TODO: implement

@@ -3,6 +3,7 @@ from typing import Tuple, Dict, Any
 import numpy as np
 
 A_UP, A_DOWN, A_LEFT, A_RIGHT = 0, 1, 2, 3
+A_UP, A_DOWN, A_LEFT, A_RIGHT = 0,1,2,3
 
 class GridToy:
     def __init__(self, size=8, stochasticity=0.05, reward_step=-0.01, reward_goal=1.0):
@@ -22,6 +23,10 @@ class GridToy:
         self.key = np.array([self.size // 2, self.size // 2])
         self.door = np.array([self.size - 2, self.size - 2])
         self.goal = np.array([self.size - 1, self.size - 1])
+        self.agent = np.array([0,0])
+        self.key = np.array([self.size//2, self.size//2])
+        self.door = np.array([self.size-2, self.size-2])
+        self.goal = np.array([self.size-1, self.size-1])
         self.has_key = False
         return self._obs(), {}
 
@@ -37,6 +42,11 @@ class GridToy:
             self.agent[1] = max(0, self.agent[1] - 1)
         if a == A_RIGHT:
             self.agent[1] = min(self.size - 1, self.agent[1] + 1)
+            a = self._rng.integers(0,4)
+        if a == A_UP:   self.agent[0] = max(0, self.agent[0]-1)
+        if a == A_DOWN: self.agent[0] = min(self.size-1, self.agent[0]+1)
+        if a == A_LEFT: self.agent[1] = max(0, self.agent[1]-1)
+        if a == A_RIGHT:self.agent[1] = min(self.size-1, self.agent[1]+1)
         r = self.r_step
         if (self.agent == self.key).all():
             self.has_key = True
@@ -50,6 +60,7 @@ class GridToy:
     def _obs(self):
         flat = np.zeros((self.observation_dim,), dtype=np.float32)
         idx = self.agent[0] * self.size + self.agent[1]
+        idx = self.agent[0]*self.size + self.agent[1]
         flat[idx] = 1.0
         obs = {
             "flat": flat,
@@ -57,6 +68,7 @@ class GridToy:
             "at_key": bool((self.agent == self.key).all()),
             "at_goal": bool((self.agent == self.goal).all()),
             "suggested_action_to_key": int(np.random.randint(0, 4)),
+            "suggested_action_to_key": int(np.random.randint(0,4)),
         }
         return obs
 

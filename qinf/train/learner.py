@@ -1,6 +1,10 @@
 from __future__ import annotations
+
 import torch
 import torch.nn.functional as F
+
+import torch, torch.nn.functional as F
+
 
 class QLearner:
     def __init__(self, qnet, target_qnet, optim, replay, gamma=0.99, n_step=1, double_q=True):
@@ -8,16 +12,24 @@ class QLearner:
         self.replay, self.gamma, self.n_step, self.double_q = replay, gamma, n_step, double_q
         self.step_i = 0
 
+
     def step(self, batch):
         import numpy as np
         transitions, idxs, weights = batch
         s, a, r, s2, d = zip(*transitions)
+
+    def step(self, batch):
+        import numpy as np
+        s, a, r, s2, d = zip(*batch)
         s = torch.tensor(np.stack(s)).float()
         a = torch.tensor(a).long().unsqueeze(1)
         r = torch.tensor(r).float().unsqueeze(1)
         s2 = torch.tensor(np.stack(s2)).float()
         d = torch.tensor(d).float().unsqueeze(1)
+
         w = torch.tensor(weights).float().unsqueeze(1)
+
+
         qsa = self.q(s).gather(1, a)
         with torch.no_grad():
             if self.double_q:
@@ -26,6 +38,7 @@ class QLearner:
             else:
                 q_next, _ = torch.max(self.tgt(s2), dim=1, keepdim=True)
             target = r + (1.0 - d) * (self.gamma ** self.n_step) * q_next
+
         td_error = qsa - target
         loss = (w * F.smooth_l1_loss(qsa, target, reduction='none')).mean()
         self.opt.zero_grad()
@@ -33,4 +46,7 @@ class QLearner:
         self.opt.step()
         self.step_i += 1
         self.replay.update_priorities(idxs, td_error.squeeze().detach().cpu().numpy())
+        loss = F.smooth_l1_loss(qsa, target)
+        self.opt.zero_grad(); loss.backward(); self.opt.step()
+        self.step_i += 1
         return {"loss": float(loss.item())}

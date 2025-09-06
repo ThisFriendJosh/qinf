@@ -5,9 +5,12 @@ class Option(ABC):
     @abstractmethod
     def should_start(self, obs) -> bool: ...
 
+
     @abstractmethod
     def policy(self, obs) -> int: ...
 
+    @abstractmethod
+    def policy(self, obs) -> int: ...
     @abstractmethod
     def should_terminate(self, obs, step_count: int) -> bool: ...
 
@@ -24,3 +27,6 @@ class GoToKey(Option):
 
     def should_terminate(self, obs, t):
         return obs.get("at_key", False) or t > 50
+    def should_start(self, obs): return obs.get("needs_key", False)
+    def policy(self, obs): return int(obs.get("suggested_action_to_key", 0))
+    def should_terminate(self, obs, t): return obs.get("at_key", False) or t > 50
