@@ -1,0 +1,7 @@
+intrinsic:
+  curiosity:
+    enabled: true
+    beta: 0.2
+  compression_gain:
+    enabled: true
+    beta: 0.1
