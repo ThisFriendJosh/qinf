@@ -1,3 +1,11 @@
+---
+intrinsic:
+  curiosity:
+    enabled: true
+    beta: 0.2
+  compression_gain:
+    enabled: true
+    beta: 0.1
 experiment:
   id: "toy-grid-hq-meta"
   seed: 42
@@ -26,6 +34,10 @@ model:
 hierarchy:
   options:
     - name: "GoToKey"
+  scheduler: {type: "epsilon_soft", eps_start: 1.0, eps_end: 0.05, eps_steps: 50000}
+
+intrinsic:
+  curiosity: {enabled: true, beta: 0.2}
     - name: "GoToDoor"
     - name: "GoToGoal"
   scheduler: {type: "epsilon_soft", eps_start: 1.0, eps_end: 0.05, eps_steps: 50000}
@@ -51,6 +63,7 @@ optim:
   batch_size: 128
   gamma: 0.99
   n_step: 3
+  replay: {capacity: 200000, warmup: 10000, prioritized: false}
   replay: {capacity: 200000, warmup: 10000, prioritized: true, alpha: 0.6, beta0: 0.4}
 
 eval:
