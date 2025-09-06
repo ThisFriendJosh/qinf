@@ -1,7 +1,7 @@
 # Q∞ (qinf)
 
 Minimal scaffold for hierarchical + meta-RL with intrinsic rewards and optional persistent memory/ledger. Start with `python scripts/run_toy.py` after installing deps. TODOs are marked in code.
-=======
+
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![Status: Experimental](https://img.shields.io/badge/status-experimental-orange)]()
 
@@ -66,4 +66,3 @@ Adjust the YAML file or provide your own to explore different setups.
 ## License
 
 The project is distributed under the MIT License. See `LICENSE` for details.
-

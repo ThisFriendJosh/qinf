@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Tuple, Dict, Any
 import numpy as np
 
+A_UP, A_DOWN, A_LEFT, A_RIGHT = 0, 1, 2, 3
 A_UP, A_DOWN, A_LEFT, A_RIGHT = 0,1,2,3
 
 class GridToy:
@@ -18,6 +19,10 @@ class GridToy:
     def reset(self, *, seed: int | None = None):
         if seed is not None:
             self._rng = np.random.default_rng(seed)
+        self.agent = np.array([0, 0])
+        self.key = np.array([self.size // 2, self.size // 2])
+        self.door = np.array([self.size - 2, self.size - 2])
+        self.goal = np.array([self.size - 1, self.size - 1])
         self.agent = np.array([0,0])
         self.key = np.array([self.size//2, self.size//2])
         self.door = np.array([self.size-2, self.size-2])
@@ -28,6 +33,15 @@ class GridToy:
     def step(self, a: int):
         a = int(a)
         if self._rng.random() < self.p:
+            a = self._rng.integers(0, 4)
+        if a == A_UP:
+            self.agent[0] = max(0, self.agent[0] - 1)
+        if a == A_DOWN:
+            self.agent[0] = min(self.size - 1, self.agent[0] + 1)
+        if a == A_LEFT:
+            self.agent[1] = max(0, self.agent[1] - 1)
+        if a == A_RIGHT:
+            self.agent[1] = min(self.size - 1, self.agent[1] + 1)
             a = self._rng.integers(0,4)
         if a == A_UP:   self.agent[0] = max(0, self.agent[0]-1)
         if a == A_DOWN: self.agent[0] = min(self.size-1, self.agent[0]+1)
@@ -45,6 +59,7 @@ class GridToy:
 
     def _obs(self):
         flat = np.zeros((self.observation_dim,), dtype=np.float32)
+        idx = self.agent[0] * self.size + self.agent[1]
         idx = self.agent[0]*self.size + self.agent[1]
         flat[idx] = 1.0
         obs = {
@@ -52,6 +67,7 @@ class GridToy:
             "needs_key": not self.has_key,
             "at_key": bool((self.agent == self.key).all()),
             "at_goal": bool((self.agent == self.goal).all()),
+            "suggested_action_to_key": int(np.random.randint(0, 4)),
             "suggested_action_to_key": int(np.random.randint(0,4)),
         }
         return obs

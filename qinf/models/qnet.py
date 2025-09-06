@@ -1,4 +1,14 @@
 from __future__ import annotations
+
+import torch
+import torch.nn as nn
+
+class DuelingQNet(nn.Module):
+    def __init__(self, obs_dim: int, n_actions: int, hidden: list[int] | None = None):
+        super().__init__()
+        if hidden is None:
+            hidden = [256, 256]
+
 import torch, torch.nn as nn
 
 class DuelingQNet(nn.Module):
