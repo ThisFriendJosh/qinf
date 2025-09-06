@@ -1,3 +1,4 @@
+from __future__ import annotations
 from __future__ import annotation
 
 import random
@@ -12,6 +13,9 @@ from qinf.envs.gridtoy import make_env
 from qinf.models.qnet import DuelingQNet
 from qinf.train.replay import Replay
 from qinf.train.learner import QLearner
+from qinf.hierarchy.options import GoToKey, GoToDoor, GoToGoal
+from qinf.intrinsic.rewards import CuriosityReward, CompressionGainReward
+from qinf.runtime.logging import Logger
 from qinf.hierarchy.options import GoToKey
 from qinf.intrinsic.rewards import CuriosityReward, CompressionGainReward
 from qinf.runtime.logging import Logger
@@ -91,6 +95,7 @@ def main(cfg_path="configs/default.yml"):
     tgt = DuelingQNet(obs_dim, n_actions)
     tgt.load_state_dict(q.state_dict())
     optim = torch.optim.Adam(q.parameters(), lr=cfg["optim"]["lr"])
+    replay = Replay(capacity=cfg["optim"]["replay"]["capacity"], warmup=cfg["optim"]["replay"]["warmup"])
     replay = Replay(capacity=cfg["optim"]["replay"]["capacity"],
                     warmup=cfg["optim"]["replay"]["warmup"])
     learner = QLearner(q, tgt, optim, replay,
@@ -98,6 +103,7 @@ def main(cfg_path="configs/default.yml"):
                        n_step=cfg["optim"]["n_step"],
                        double_q=cfg["model"]["double_q"])
 
+    options = [GoToKey(), GoToDoor(), GoToGoal()]
     options = [GoToKey()]
     scheduler = EpsilonSoftScheduler(**cfg["hierarchy"]["scheduler"])
     r_cur = CuriosityReward(**cfg["intrinsic"]["curiosity"])
@@ -165,6 +171,7 @@ def main(cfg_path="configs/default.yml"):
                 if terminated or truncated or opt.should_terminate(obs, t):
                     break
         else:
+            # primitive action via greedy over Q with annealed epsilon in scheduler
                 obs = next_obs; episodic_return += r_ext; step += 1; t += 1
                 if terminated or truncated or opt.should_terminate(obs, t):
                     break
