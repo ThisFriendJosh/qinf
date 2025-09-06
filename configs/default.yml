@@ -1,0 +1,40 @@
+experiment:
+  id: "toy-grid-hq-meta"
+  seed: 42
+  total_steps: 200000
+  log_every: 1000
+  eval_every: 10000
+
+env:
+  name: "GridWorldToy-v0"
+  size: 8
+  stochasticity: 0.05
+  reward_goal: 1.0
+  reward_step: -0.01
+
+model:
+  qnet: {type: "dueling", hidden: [256, 256]}
+  target_update_interval: 2000
+  double_q: true
+  distributional: false
+
+hierarchy:
+  options:
+    - name: "GoToKey"
+  scheduler: {type: "epsilon_soft", eps_start: 1.0, eps_end: 0.05, eps_steps: 50000}
+
+intrinsic:
+  curiosity: {enabled: true, beta: 0.2}
+  compression_gain: {enabled: true, beta: 0.1}
+
+memory:
+  backend: "lmdb"
+  path: "./runs/memory"
+  ledger_mode: false
+
+optim:
+  lr: 0.00025
+  batch_size: 128
+  gamma: 0.99
+  n_step: 3
+  replay: {capacity: 200000, warmup: 10000, prioritized: false}
