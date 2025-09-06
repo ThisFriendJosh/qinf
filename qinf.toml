@@ -172,9 +172,15 @@ class GridToy:
         self.r_step = reward_step
         self.r_goal = reward_goal
         self.action_space = 4
-        self.observation_dim = size * size
+        # Observation is a one-hot over grid cells; expose shape via protocol
+        self._observation_space = (size * size,)
         self._rng = np.random.default_rng()
         self.reset()
+
+    @property
+    def observation_space(self) -> Tuple[int, ...]:
+        """Shape of observations as a tuple."""
+        return self._observation_space
 
     def reset(self, *, seed: int | None = None):
         if seed is not None:
@@ -205,7 +211,7 @@ class GridToy:
         return self._obs(), float(r), terminated, truncated, {}
 
     def _obs(self):
-        flat = np.zeros((self.observation_dim,), dtype=np.float32)
+        flat = np.zeros(self.observation_space, dtype=np.float32)
         idx = self.agent[0]*self.size + self.agent[1]
         flat[idx] = 1.0
         obs = {
@@ -410,9 +416,11 @@ def main(cfg_path="configs/default.yml"):
     logger = Logger(Path("./runs"), cfg["experiment"]["id"])    
 
     env = make_env(size=cfg["env"]["size"], stochasticity=cfg["env"]["stochasticity"],
-                   reward_step=cfg["env"]["reward_step"], reward_goal=cfg["env"]["reward_goal"])    
+                   reward_step=cfg["env"]["reward_step"], reward_goal=cfg["env"]["reward_goal"])
     obs, _ = env.reset()
-    obs_dim, n_actions = env.observation_dim, env.action_space
+    # Flattened dimension for network input
+    obs_dim = int(np.prod(env.observation_space))
+    n_actions = env.action_space
 
     q = DuelingQNet(obs_dim, n_actions)
     tgt = DuelingQNet(obs_dim, n_actions); tgt.load_state_dict(q.state_dict())
