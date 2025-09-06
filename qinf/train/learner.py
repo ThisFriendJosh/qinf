@@ -1,4 +1,21 @@
 from __future__ import annotations
+import torch
+import torch.nn.functional as F
+
+
+class QLearner:
+    def __init__(self, qnet, target_qnet, optim, replay, gamma: float = 0.99,
+                 n_step: int = 1, double_q: bool = True) -> None:
+        self.q, self.tgt, self.opt = qnet, target_qnet, optim
+        self.replay = replay
+        self.gamma = gamma
+        self.n_step = n_step
+        self.double_q = double_q
+        self.step_i = 0
+
+    def step(self, batch):
+        import numpy as np
+
 
 import torch
 import torch.nn.functional as F
@@ -38,6 +55,7 @@ class QLearner:
             else:
                 q_next, _ = torch.max(self.tgt(s2), dim=1, keepdim=True)
             target = r + (1.0 - d) * (self.gamma ** self.n_step) * q_next
+        loss = F.smooth_l1_loss(qsa, target)
 
         td_error = qsa - target
         loss = (w * F.smooth_l1_loss(qsa, target, reduction='none')).mean()

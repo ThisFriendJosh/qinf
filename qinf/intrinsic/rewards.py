@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+
+class IntrinsicReward:
+    def compute(self, obs, next_obs, action, extras: dict) -> float:
 """Intrinsic reward functions implemented without third-party dependencies."""
 from __future__ import annotations
 
@@ -14,6 +19,20 @@ class IntrinsicReward:
 
 
 class CuriosityReward(IntrinsicReward):
+    def __init__(self, beta: float = 0.2) -> None:
+        self.beta = beta
+
+    def compute(self, obs, next_obs, action, extras: dict) -> float:
+        # Placeholder: no intrinsic reward by default
+        return 0.0
+
+
+class CompressionGainReward(IntrinsicReward):
+    def __init__(self, beta: float = 0.1) -> None:
+        self.beta = beta
+
+    def compute(self, obs, next_obs, action, extras: dict) -> float:
+        return 0.0
     """Random Network Distillation implemented with pure Python.
 
     A fixed random linear projection (the "target" network) is compared to a

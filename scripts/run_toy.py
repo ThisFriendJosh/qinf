@@ -1,9 +1,11 @@
-from __future__ import annotations
+from __future__ import annotation
 
 import random
 import yaml
 import torch
 import numpy as np
+from pathlib import Path
+
 import random, yaml, torch, numpy as np
 from pathlib import Path
 from qinf.envs.gridtoy import make_env
@@ -13,6 +15,18 @@ from qinf.train.learner import QLearner
 from qinf.hierarchy.options import GoToKey
 from qinf.intrinsic.rewards import CuriosityReward, CompressionGainReward
 from qinf.runtime.logging import Logger
+from qinf.memory.lmdb_store import LMDBStore
+
+
+class EpsilonSoftScheduler:
+    def __init__(self, eps_start: float = 1.0, eps_end: float = 0.05, steps: int = 50_000):
+        self.eps_start, self.eps_end, self.steps = eps_start, eps_end, steps
+        self.t = 0
+
+    def eps(self) -> float:
+        k = max(0.0, (self.steps - self.t) / self.steps)
+        return self.eps_end + (self.eps_start - self.eps_end) * k
+
 
 class EpsilonSoftScheduler:
     def __init__(self, eps_start=1.0, eps_end=0.05, steps=50000):
@@ -31,11 +45,28 @@ class EpsilonSoftScheduler:
         use_option = random.random() > self.eps()
         return random.choice(opts) if (use_option and opts) else None
 
+
+def set_seed(s: int) -> None:
 def set_seed(s):
     random.seed(s)
     np.random.seed(s)
     torch.manual_seed(s)
 
+
+def main(cfg_path: str = "configs/default.yml"):
+    cfg = yaml.safe_load(Path(cfg_path).read_text())
+    set_seed(cfg["experiment"]["seed"])
+
+    memory = None
+    if cfg.get("memory", {}).get("ledger_mode"):
+        memory = LMDBStore(Path(cfg["memory"]["path"]))
+
+    logger = Logger(Path("./runs"), cfg["experiment"]["id"],
+                    ledger_mode=cfg.get("memory", {}).get("ledger_mode", False),
+                    memory=memory)
+
+    env = make_env(size=cfg["env"]["size"], stochasticity=cfg["env"]["stochasticity"],
+                   reward_step=cfg["env"]["reward_step"], reward_goal=cfg["env"]["reward_goal"])
 def main(cfg_path="configs/default.yml"):
     cfg = yaml.safe_load(Path(cfg_path).read_text())
     set_seed(cfg["experiment"]["seed"])
@@ -60,6 +91,17 @@ def main(cfg_path="configs/default.yml"):
     tgt = DuelingQNet(obs_dim, n_actions)
     tgt.load_state_dict(q.state_dict())
     optim = torch.optim.Adam(q.parameters(), lr=cfg["optim"]["lr"])
+    replay = Replay(capacity=cfg["optim"]["replay"]["capacity"],
+                    warmup=cfg["optim"]["replay"]["warmup"])
+    learner = QLearner(q, tgt, optim, replay,
+                       gamma=cfg["optim"]["gamma"],
+                       n_step=cfg["optim"]["n_step"],
+                       double_q=cfg["model"]["double_q"])
+
+    options = [GoToKey()]
+    scheduler = EpsilonSoftScheduler(**cfg["hierarchy"]["scheduler"])
+    r_cur = CuriosityReward(**cfg["intrinsic"]["curiosity"])
+    r_cmp = CompressionGainReward(**cfg["intrinsic"]["compression_gain"])
     replay_cfg = cfg["optim"]["replay"]
     replay = Replay(
         capacity=replay_cfg["capacity"],
@@ -157,6 +199,7 @@ def main(cfg_path="configs/default.yml"):
         if terminated or truncated:
             obs, _ = env.reset()
             episodic_return = 0.0
+
             obs, _ = env.reset(); episodic_return = 0.0
 
 if __name__ == "__main__":

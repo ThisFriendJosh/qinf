@@ -1,4 +1,15 @@
 from __future__ import annotations
+from typing import Any, Dict
+import numpy as np
+
+A_UP, A_DOWN, A_LEFT, A_RIGHT = 0, 1, 2, 3
+
+
+class GridToy:
+    """Simple grid world environment with a key and goal."""
+
+    def __init__(self, size: int = 8, stochasticity: float = 0.05,
+                 reward_step: float = -0.01, reward_goal: float = 1.0) -> None:
 from typing import Tuple, Dict, Any
 import numpy as np
 
@@ -57,6 +68,9 @@ class GridToy:
         truncated = False
         return self._obs(), float(r), terminated, truncated, {}
 
+    def _obs(self) -> Dict[str, Any]:
+        flat = np.zeros((self.observation_dim,), dtype=np.float32)
+        idx = self.agent[0] * self.size + self.agent[1]
     def _obs(self):
         flat = np.zeros((self.observation_dim,), dtype=np.float32)
         idx = self.agent[0] * self.size + self.agent[1]
@@ -67,6 +81,7 @@ class GridToy:
             "needs_key": not self.has_key,
             "at_key": bool((self.agent == self.key).all()),
             "at_goal": bool((self.agent == self.goal).all()),
+            "suggested_action_to_key": int(self._rng.integers(0, 4)),
             "suggested_action_to_key": int(np.random.randint(0, 4)),
             "suggested_action_to_key": int(np.random.randint(0,4)),
         }

@@ -1,5 +1,6 @@
 # Q∞ (qinf)
 
+wards and optional persistent memory/ledger.
 Minimal scaffold for hierarchical + meta-RL with intrinsic rewards and optional persistent memory/ledger. Start with `python scripts/run_toy.py` after installing deps. TODOs are marked in code.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
